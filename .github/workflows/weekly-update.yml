@@ -1,0 +1,151 @@
+name: Weekly promise status update
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Monday 06:00 UTC
+  workflow_dispatch: {} # allows manual test runs from the Actions tab / `gh workflow run`
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  research-draft:
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.vars.outputs.branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute branch name
+        id: vars
+        run: echo "branch=auto-update/$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "rendszervaltas-bot"
+          git config user.email "rendszervaltas-bot@users.noreply.github.com"
+          git checkout -b "${{ steps.vars.outputs.branch }}"
+
+      - name: Research news and draft status updates
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --allowedTools "Read,Edit,WebSearch,WebFetch,Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git status:*),Bash(git diff:*)"
+            --max-turns 60
+          prompt: |
+            You maintain a Hungarian civic-tracking site for the Tisza Párt 2026 kormányprogram
+            (`promises_data.js`, ~1000 promise items with fields including `id`, `title`,
+            `description`, `category`, `status`, optional `startDate`, and `sources: [{type,url,label}]`).
+            Valid `status` values: "tervben", "egyeztetes", "orszaggyules", "folyamatban", "megvalosult".
+
+            1. Read CHANGELOG.md and find the most recent dated entry — that is your research
+               start date. Today is $(date -u +%Y-%m-%d).
+            2. Use WebSearch/WebFetch to find real developments since that date relevant to
+               specific promises in promises_data.js: new laws (Magyar Közlöny), Országgyűlés
+               proceedings, official Tisza Párt statements, and reputable Hungarian news coverage.
+            3. For each promise where you find a genuine, verifiable development: update its
+               `status` (only move forward along tervben -> egyeztetes -> orszaggyules ->
+               folyamatban -> megvalosult unless a source explicitly documents a reversal),
+               set/update `startDate` if a concrete start date is confirmed, and append a new
+               entry to its `sources` array with the real url/type/label.
+            4. Do NOT invent, guess, or paraphrase-as-fact any URL, date, or status change. If you
+               cannot find a credible primary or reputable secondary source for a change, leave
+               that promise untouched. It is fine to make zero changes if nothing qualifies.
+            5. Prepend a new dated section (## YYYY-MM-DD) to the top of CHANGELOG.md (right
+               after the title) listing every promise you changed: its title, old status ->
+               new status, the source URL, and the source's own publication date. Also note
+               how many promises you reviewed vs. changed.
+            6. Stage, commit (message: "chore: weekly promise status update <date>"), and push
+               the current branch (`${{ steps.vars.outputs.branch }}`) to origin. Do not touch
+               the main branch.
+
+  validate:
+    needs: research-draft
+    runs-on: ubuntu-latest
+    outputs:
+      verdict: ${{ steps.read-verdict.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.research-draft.outputs.branch }}
+          fetch-depth: 0
+
+      - name: Independent fact-check of the draft changes
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --allowedTools "Read,WebSearch,WebFetch,Bash(git diff:*),Bash(git log:*)"
+            --max-turns 40
+          prompt: |
+            You are an independent, skeptical fact-checker reviewing a draft update to a civic
+            promise-tracking dataset before it is allowed to auto-publish. You did not write
+            this draft — treat every claim in it as unverified until you confirm it yourself.
+
+            1. Run `git diff main...HEAD` to see every change on this branch to
+               promises_data.js and CHANGELOG.md.
+            2. For every changed promise: fetch the cited source URL and confirm it is real,
+               reachable, and actually supports the specific status change and date claimed.
+               Confirm the status transition is logical (no unexplained regression, e.g.
+               megvalosult -> tervben, unless explicitly justified in the source).
+            3. Confirm CHANGELOG.md's new entry accurately and completely reflects the diff
+               (no changed promise missing from it, no listed change that isn't actually in
+               the diff).
+            4. Write your verdict to a file named `validation-result.txt` at the repo root:
+               first line must be exactly `PASS` or `FAIL`, followed by a short explanation
+               (list any specific problems found, or confirm what you checked, if PASS).
+
+      - name: Read verdict
+        id: read-verdict
+        run: |
+          if [ -f validation-result.txt ]; then
+            head -n1 validation-result.txt | grep -q '^PASS$' && echo "verdict=PASS" >> "$GITHUB_OUTPUT" || echo "verdict=FAIL" >> "$GITHUB_OUTPUT"
+          else
+            echo "verdict=FAIL" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload validation result
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-result
+          path: validation-result.txt
+          if-no-files-found: warn
+
+  publish-or-escalate:
+    needs: [research-draft, validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download validation result
+        if: needs.validate.outputs.verdict != 'PASS'
+        uses: actions/download-artifact@v4
+        with:
+          name: validation-result
+          path: .
+
+      - name: Merge into main (validation passed)
+        if: needs.validate.outputs.verdict == 'PASS'
+        run: |
+          git config user.name "rendszervaltas-bot"
+          git config user.email "rendszervaltas-bot@users.noreply.github.com"
+          git checkout main
+          git merge --no-ff "origin/${{ needs.research-draft.outputs.branch }}" -m "merge: weekly promise status update (validated)"
+          git push origin main
+          git push origin --delete "${{ needs.research-draft.outputs.branch }}"
+
+      - name: Escalate to a GitHub issue (validation failed)
+        if: needs.validate.outputs.verdict != 'PASS'
+        run: |
+          gh issue create \
+            --title "Weekly update needs review — validation failed ($(date -u +%Y-%m-%d))" \
+            --body "$(printf 'The automated validator did not approve this week'"'"'s draft update.\n\nDraft branch: `%s` (left open for manual review, not merged into main).\n\nValidator output:\n\n%s' "${{ needs.research-draft.outputs.branch }}" "$(cat validation-result.txt 2>/dev/null || echo 'No validation-result.txt was produced.')")"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

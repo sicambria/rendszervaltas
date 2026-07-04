@@ -1,0 +1,526 @@
+
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TISZA Program - Ígéretek és Megvalósulás</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Vállalások adatai (a tisza2026.pdf-ből kinyerve) -->
+    <script src="promises_data.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        tisza: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            700: '#0369a1',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Alapvető beállítások */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        /* Gördítősáv formázása a szép megjelenésért */
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 5px; }
+        ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 5px; border: 2px solid #f1f1f1; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+        
+        /* Gördítősáv nagy kontraszt esetén */
+        body.bg-black ::-webkit-scrollbar-track { background: #222; border: 1px solid #444; }
+        body.bg-black ::-webkit-scrollbar-thumb { background: #fff; border: 2px solid #222; }
+        body.bg-black ::-webkit-scrollbar-thumb:hover { background: #ccc; }
+        
+        /* A panelhúzó gomb nem jelölhető ki */
+        .no-select { user-select: none; -webkit-user-select: none; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 transition-colors duration-200">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // Ikonok egyszerűsített használata CDN-ből
+        const Icon = ({ name, size = 24, className = "" }) => {
+            return <i data-lucide={name} className={`${className}`} style={{ width: size, height: size }}></i>;
+        };
+
+        // --- ADATOK ---
+        // A PROMISES és PROMISE_CATEGORIES tömböket a promises_data.js tölti be
+        // (a tisza2026.pdf-ből kinyert 1000+ vállalás alapján).
+        const CATEGORIES = (typeof PROMISE_CATEGORIES !== 'undefined') ? PROMISE_CATEGORIES : ["Minden"];
+
+        // Az összes lehetséges státusz (címkékhez és a kártyajelöléshez)
+        const STATUSES = [
+            { id: "tervben", label: "Tervben", color: "bg-gray-100 border-gray-300 text-gray-800" },
+            { id: "egyeztetes", label: "Közös megbeszélés alatt", color: "bg-yellow-50 border-yellow-300 text-yellow-800" },
+            { id: "orszaggyules", label: "Országgyűlés előtt", color: "bg-blue-50 border-blue-300 text-blue-800" },
+            { id: "folyamatban", label: "Folyamatban", color: "bg-orange-50 border-orange-300 text-orange-800" },
+            { id: "megvalosult", label: "Megvalósult", color: "bg-green-50 border-green-400 text-green-800" }
+        ];
+
+        // Gyors státusz-kikeresés id alapján
+        const STATUS_BY_ID = Object.fromEntries(STATUSES.map(s => [s.id, s]));
+
+        // A "Hol tartunk most?" tábla oszlopai: a "Tervben" oszlop nincs benne,
+        // a "Folyamatban" a 3. helyen áll (elindult, de még hónapokig tart).
+        const BOARD_STATUSES = [
+            STATUS_BY_ID["egyeztetes"],
+            STATUS_BY_ID["orszaggyules"],
+            STATUS_BY_ID["folyamatban"],
+            STATUS_BY_ID["megvalosult"]
+        ];
+
+        // A teljes PROMISES tömb a promises_data.js fájlból töltődik be (1000+ vállalás).
+        // Minden vállalás alapból "tervben" státuszú; a státusz idővel kézzel frissíthető.
+
+        // --- KOMPONENSEK ---
+
+        // Kártya komponens egy ígéret megjelenítésére
+        const PromiseCard = ({ item, showTimeline = false, hc = false }) => {
+            return (
+                <div className={`rounded-xl shadow-sm border p-5 mb-4 hover:shadow-md transition-shadow ${hc ? 'bg-black border-white text-white' : 'bg-white border-gray-200'}`}>
+                    <div className="flex justify-between items-start mb-3">
+                        <div>
+                            <span className={`inline-block px-3 py-1 rounded-full text-sm font-semibold border ${hc ? 'bg-black text-gray-200 border-white' : 'bg-blue-100 text-blue-800 border-transparent'}`}>
+                                {item.category}
+                            </span>
+                            {item.subsection && (
+                                <span className={`inline-block px-2 py-1 ml-2 rounded text-xs font-bold border ${hc ? 'bg-gray-800 text-gray-300 border-gray-600' : 'bg-gray-100 text-gray-600 border-transparent'}`} title="Program fejezet">
+                                    {item.subsection}
+                                </span>
+                            )}
+                        </div>
+                        {showTimeline && item.subsectionTitle && (
+                            <span className={`flex items-center text-sm font-bold px-3 py-1 rounded-lg border max-w-[45%] text-right ${hc ? 'bg-black text-white border-white' : 'bg-gray-100 text-gray-600 border-transparent'}`}>
+                                <Icon name="book-open" size={16} className="mr-2 shrink-0" />
+                                <span className="truncate">{item.subsectionTitle}</span>
+                            </span>
+                        )}
+                    </div>
+
+                    {/* Állapot-címke (minden vállalásnál) + indulás dátuma, ha van */}
+                    {(() => {
+                        const st = STATUS_BY_ID[item.status] || STATUS_BY_ID["tervben"];
+                        return (
+                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                                <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-bold border ${hc ? 'bg-black text-white border-white' : st.color}`}>
+                                    <Icon name="flag" size={14} className="mr-1.5" />
+                                    {st.label}
+                                </span>
+                                {item.startDate && (
+                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold border ${hc ? 'bg-black text-gray-200 border-gray-400' : 'bg-gray-50 text-gray-600 border-gray-200'}`} title="Az ügy indulása">
+                                        <Icon name="calendar-clock" size={14} className="mr-1.5" />
+                                        Indulás: {item.startDate}
+                                    </span>
+                                )}
+                            </div>
+                        );
+                    })()}
+
+                    <h3 className={`text-xl font-bold mb-2 leading-tight ${hc ? 'text-white' : 'text-gray-900'}`}>{item.title}</h3>
+                    <p className={`text-lg mb-4 leading-relaxed ${hc ? 'text-gray-300' : 'text-gray-700'}`}>{item.description}</p>
+                    
+                    <div className={`mt-4 pt-4 border-t ${hc ? 'border-gray-600' : 'border-gray-100'}`}>
+                        <p className={`text-sm font-bold mb-2 uppercase tracking-wider ${hc ? 'text-gray-300' : 'text-gray-500'}`}>Hiteles források:</p>
+                        <div className="flex flex-wrap gap-2">
+                            {item.sources.map((src, idx) => (
+                                <a key={idx} href={src.url} className={`inline-flex items-center px-3 py-1.5 text-sm font-medium rounded border transition-colors focus:ring-4 focus:ring-blue-300 ${hc ? 'bg-black text-gray-200 border-gray-400 hover:bg-gray-800' : 'bg-gray-100 text-gray-800 hover:bg-gray-200 border-gray-300'}`}>
+                                    {src.type === 'Közlöny' && <Icon name="book-open" size={14} className="mr-1.5" />}
+                                    {src.type === 'Sajtó' && <Icon name="newspaper" size={14} className="mr-1.5" />}
+                                    {src.type === 'Facebook' && <Icon name="thumbs-up" size={14} className="mr-1.5" />}
+                                    {src.type === 'Honlap' && <Icon name="globe" size={14} className="mr-1.5" />}
+                                    {src.type === 'Országgyűlés' && <Icon name="landmark" size={14} className="mr-1.5" />}
+                                    {src.label}
+                                </a>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            // Állapotok (State)
+            const [searchTerm, setSearchTerm] = useState("");
+            const [categoryFilter, setCategoryFilter] = useState("Minden");
+            const [highContrast, setHighContrast] = useState(false);
+            
+            // Panelek nyitottsága és átméretezése
+            const [leftOpen, setLeftOpen] = useState(true);
+            const [rightOpen, setRightOpen] = useState(true);
+            const [leftWidth, setLeftWidth] = useState(33.33); // Százalékban
+            const [isDragging, setIsDragging] = useState(false);
+
+            // Megjelenített vállalások száma (teljesítmény: 1000+ elemnél fokozatos betöltés)
+            const PAGE_SIZE = 80;
+            const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+            // Szűrő/keresés változásakor visszaállunk az elejére
+            useEffect(() => { setVisibleCount(PAGE_SIZE); }, [searchTerm, categoryFilter]);
+
+            // Ikonok frissítése
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [leftOpen, rightOpen, highContrast, searchTerm, categoryFilter]);
+
+            // Testszín beállítása a nagy kontraszt alapján
+            useEffect(() => {
+                if (highContrast) {
+                    document.body.className = "bg-black text-white transition-colors duration-200";
+                } else {
+                    document.body.className = "bg-gray-50 text-gray-900 transition-colors duration-200";
+                }
+            }, [highContrast]);
+
+            // Golyóálló panel-átméretezési logika
+            useEffect(() => {
+                const handleMove = (clientX) => {
+                    if (!isDragging) return;
+                    const container = document.getElementById('main-container');
+                    if (container) {
+                        const containerRect = container.getBoundingClientRect();
+                        const newWidth = ((clientX - containerRect.left) / containerRect.width) * 100;
+                        // Minimum és maximum határok (20% és 80% között)
+                        if (newWidth > 20 && newWidth < 80) {
+                            setLeftWidth(newWidth);
+                        }
+                    }
+                };
+
+                const handleMouseMove = (e) => handleMove(e.clientX);
+                const handleTouchMove = (e) => handleMove(e.touches[0].clientX);
+
+                const handleUp = () => setIsDragging(false);
+
+                if (isDragging) {
+                    // Megakadályozzuk a szövegkijelölést húzás közben
+                    document.body.style.userSelect = 'none';
+                    
+                    document.addEventListener('mousemove', handleMouseMove);
+                    document.addEventListener('mouseup', handleUp);
+                    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+                    document.addEventListener('touchend', handleUp);
+                } else {
+                    document.body.style.userSelect = '';
+                }
+                
+                return () => {
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleUp);
+                    document.removeEventListener('touchmove', handleTouchMove);
+                    document.removeEventListener('touchend', handleUp);
+                };
+            }, [isDragging]);
+
+            // Szűrés logikája
+            const filteredPromises = useMemo(() => {
+                const term = searchTerm.toLowerCase();
+                const subKey = (s) => {
+                    // "3.10" -> 3.10 numerikus rendezéshez
+                    if (!s) return 99;
+                    const [a, b] = s.split('.');
+                    return parseInt(a, 10) + parseInt(b, 10) / 100;
+                };
+                return PROMISES.filter(p => {
+                    const matchesSearch = p.title.toLowerCase().includes(term) ||
+                                          p.description.toLowerCase().includes(term);
+                    const matchesCategory = categoryFilter === "Minden" || p.category === categoryFilter;
+                    return matchesSearch && matchesCategory;
+                }).sort((a, b) => subKey(a.subsection) - subKey(b.subsection) || a.id - b.id);
+            }, [searchTerm, categoryFilter]);
+
+            // Panelek kezelése: Ha az egyiket bezárjuk, a másiknak nyitva kell lennie
+            const toggleLeft = () => {
+                if (leftOpen && !rightOpen) setRightOpen(true);
+                setLeftOpen(!leftOpen);
+            };
+            
+            const toggleRight = () => {
+                if (!leftOpen && rightOpen) setLeftOpen(true);
+                setRightOpen(!rightOpen);
+            };
+
+            // Megvalósulás kalkulációk: vállalások darabszáma alapján
+            const totalCount = PROMISES.length;
+            const completedCount = useMemo(() => PROMISES.filter(p => p.status === "megvalosult").length, []);
+            const completionPercentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+            // Rendszerváltás index (Becsült érték a példához)
+            const rendszervaltasIndexPercent = 42;
+
+            return (
+                <div className="min-h-screen flex flex-col overflow-x-hidden">
+                    {/* FEJLÉC */}
+                    <header className={`p-4 shadow-lg z-10 ${highContrast ? 'bg-black border-b border-white' : 'bg-tisza-900 text-white'}`}>
+                        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+                            <div className="flex items-center gap-4">
+                                {/* Magyar zászló */}
+                                <div className="flex flex-col h-10 w-16 rounded overflow-hidden border border-gray-300 shadow-sm" aria-label="Magyar zászló">
+                                    <div className="bg-[#CE2939] flex-1"></div>
+                                    <div className="bg-white flex-1"></div>
+                                    <div className="bg-[#477050] flex-1"></div>
+                                </div>
+                                
+                                <div>
+                                    <h1 className="text-2xl md:text-3xl font-bold">Rendszerváltás Követő</h1>
+                                    <p className={`text-sm md:text-base ${highContrast ? 'text-gray-300' : 'opacity-90'}`}>Ígéretek és tények átláthatóan, mindenki számára.</p>
+                                </div>
+                            </div>
+                            
+                            {/* Nagy kontraszt gomb */}
+                            <button 
+                                onClick={() => setHighContrast(!highContrast)}
+                                className={`flex items-center px-4 py-2 rounded-lg font-bold text-lg focus:ring-4 focus:ring-yellow-400 border transition-colors ${highContrast ? 'bg-white text-black border-white hover:bg-gray-200' : 'bg-tisza-700 text-white hover:bg-tisza-500 border-white'}`}
+                                aria-label="Gyengénlátó mód be- és kikapcsolása"
+                            >
+                                <Icon name="eye" className="mr-2" />
+                                {highContrast ? 'Normál nézet' : 'Nagy kontraszt (Fekete/Fehér)'}
+                            </button>
+                        </div>
+                    </header>
+
+                    {/* SZŰRŐK ÉS VEZÉRLŐK */}
+                    <section className={`shadow p-4 sticky top-0 z-20 ${highContrast ? 'bg-black border-b border-white' : 'bg-white'}`}>
+                        <div className="max-w-7xl mx-auto flex flex-col gap-4">
+                            
+                            {/* HALADÁSI JELZŐK */}
+                            <div className="flex flex-col md:flex-row gap-4 mb-2">
+                                {/* Bal: Program megvalósulása */}
+                                <div className={`flex-1 rounded-xl p-4 border transition-colors ${highContrast ? 'border-white bg-black text-white' : 'border-gray-200 bg-white shadow-sm'}`}>
+                                    <div className="flex justify-between items-end mb-2">
+                                        <h3 className="font-bold text-lg">Program megvalósulása</h3>
+                                        <span className={`text-2xl font-black ${highContrast ? 'text-white' : 'text-tisza-600'}`}>{completionPercentage}%</span>
+                                    </div>
+                                    <div className={`w-full rounded-full h-4 mb-2 border ${highContrast ? 'bg-gray-900 border-gray-500' : 'bg-gray-200 border-transparent'}`}>
+                                        <div className={`h-full rounded-full transition-all duration-1000 ${highContrast ? 'bg-white' : 'bg-tisza-500'}`} style={{ width: `${completionPercentage}%` }}></div>
+                                    </div>
+                                    <p className={`text-sm text-right font-medium ${highContrast ? 'text-gray-400' : 'text-gray-500'}`}>
+                                        {completedCount} / {totalCount} vállalás megvalósult
+                                    </p>
+                                </div>
+
+                                {/* Jobb: Rendszerváltás Index */}
+                                <a href="https://changemappers.org/projects/rendszervalto-index/" target="_blank" rel="noreferrer" 
+                                className={`flex-1 rounded-xl p-4 border transition-all hover:-translate-y-1 hover:shadow-md block group ${highContrast ? 'border-white bg-black text-white hover:bg-gray-900' : 'border-gray-200 bg-white shadow-sm hover:border-green-300 hover:bg-green-50'}`}>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <h3 className="font-bold text-lg flex items-center group-hover:underline">
+                                            Rendszerváltás Index
+                                            <Icon name="external-link" size={16} className="ml-2 opacity-70" />
+                                        </h3>
+                                        <span className={`text-2xl font-black ${highContrast ? 'text-white' : 'text-green-600'}`}>{rendszervaltasIndexPercent}%</span>
+                                    </div>
+                                    <div className={`w-full rounded-full h-4 mb-2 border ${highContrast ? 'bg-gray-900 border-gray-500' : 'bg-gray-200 border-transparent'}`}>
+                                        <div className={`h-full rounded-full transition-all duration-1000 ${highContrast ? 'bg-white' : 'bg-green-500'}`} style={{ width: `${rendszervaltasIndexPercent}%` }}></div>
+                                    </div>
+                                    <p className={`text-sm text-right font-medium flex items-center justify-end gap-1 ${highContrast ? 'text-gray-400' : 'text-gray-500 group-hover:text-green-700'}`}>
+                                        Részletes elemzés <Icon name="arrow-right" size={14} />
+                                    </p>
+                                </a>
+                            </div>
+
+                            {/* KERESÉS ÉS GOMBOK */}
+                            <div className={`flex flex-col md:flex-row gap-4 items-center justify-between border-t pt-4 ${highContrast ? 'border-gray-700' : 'border-gray-100'}`}>
+                                <div className="flex-1 w-full md:w-auto flex flex-col md:flex-row gap-4">
+                                    {/* Kereső */}
+                                    <div className="relative flex-1">
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                            <Icon name="search" className={highContrast ? 'text-gray-300' : 'text-gray-400'} />
+                                        </div>
+                                        <input 
+                                            type="text" 
+                                            placeholder="Keresés az ígéretek között (pl. adó, egészségügy)..." 
+                                            className={`w-full pl-10 pr-4 py-3 rounded-lg border text-lg focus:ring-4 focus:ring-blue-500 outline-none transition-all ${highContrast ? 'bg-black text-white border-white' : 'border-gray-300 bg-gray-50'}`}
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            aria-label="Keresés az ígéretek között"
+                                        />
+                                    </div>
+
+                                    {/* Kategória szűrő */}
+                                    <select 
+                                        className={`py-3 px-4 rounded-lg border text-lg focus:ring-4 focus:ring-blue-500 outline-none cursor-pointer ${highContrast ? 'bg-black text-white border-white' : 'border-gray-300 bg-gray-50'}`}
+                                        value={categoryFilter}
+                                        onChange={(e) => setCategoryFilter(e.target.value)}
+                                        aria-label="Témakör kiválasztása"
+                                    >
+                                        {CATEGORIES.map(cat => (
+                                            <option key={cat} value={cat}>{cat}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* Panel nyitó/záró gombok */}
+                                <div className="flex gap-2 w-full md:w-auto">
+                                    <button
+                                        onClick={toggleRight}
+                                        className={`flex-1 md:flex-none px-4 py-3 rounded-lg font-bold flex items-center justify-center border focus:ring-4 focus:ring-blue-300 transition-colors ${!rightOpen ? (highContrast ? 'bg-white text-black' : 'bg-tisza-100 text-tisza-900 border-tisza-300') : (highContrast ? 'bg-black text-white border-white hover:bg-gray-800' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100')}`}
+                                        aria-label={rightOpen ? 'Program panel összecsukása' : 'Program panel kinyitása'}
+                                    >
+                                        <Icon name={rightOpen ? "panel-left-close" : "panel-left-open"} className="mr-2" />
+                                        Program
+                                    </button>
+                                    <button
+                                        onClick={toggleLeft}
+                                        className={`flex-1 md:flex-none px-4 py-3 rounded-lg font-bold flex items-center justify-center border focus:ring-4 focus:ring-green-300 transition-colors ${!leftOpen ? (highContrast ? 'bg-white text-black' : 'bg-green-100 text-green-900 border-green-300') : (highContrast ? 'bg-black text-white border-white hover:bg-gray-800' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100')}`}
+                                        aria-label={leftOpen ? 'Megvalósulás panel összecsukása' : 'Megvalósulás panel kinyitása'}
+                                    >
+                                        Megvalósulás
+                                        <Icon name={leftOpen ? "panel-right-close" : "panel-right-open"} className="ml-2" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* FŐ MUNKATERÜLET (Panelek) */}
+                    <main id="main-container" className="flex-1 p-4 w-full flex flex-col lg:flex-row items-stretch min-w-0" style={{ '--left-width': `${leftWidth}%` }}>
+                        
+                        {/* BAL PANEL: PROGRAM ÉS IDŐVONAL */}
+                        {leftOpen && (
+                            <section className={`flex-col flex h-full mb-4 lg:mb-0 min-w-0 w-full ${rightOpen ? 'lg:w-[calc(var(--left-width)-12px)]' : 'lg:w-full'}`}>
+                                <div className={`p-4 rounded-t-xl border-b-4 flex flex-col justify-center ${highContrast ? 'bg-black border-white' : 'bg-tisza-50 border-tisza-500'}`}>
+                                    <div className="flex items-center">
+                                        <Icon name="book-open-check" size={28} className={highContrast ? 'text-white mr-3' : 'text-tisza-700 mr-3'} />
+                                        <h2 className="text-2xl font-black">Tisza Párt Kormányprogram</h2>
+                                    </div>
+                                    <a href="https://magyartisza.hu/program" target="_blank" rel="noreferrer" className={`mt-1 text-sm underline ml-[40px] ${highContrast ? 'text-gray-300 hover:text-white' : 'text-tisza-700 hover:text-tisza-900'}`}>
+                                        forrás: https://magyartisza.hu/program
+                                    </a>
+                                </div>
+                                <div className={`flex-1 p-4 rounded-b-xl overflow-y-auto ${highContrast ? 'bg-black border border-t-0 border-white' : 'bg-white shadow-inner border border-t-0 border-gray-200'}`} style={{ maxHeight: 'calc(100vh - 300px)', minHeight: '500px' }}>
+                                    
+                                    {filteredPromises.length === 0 ? (
+                                        <div className={`text-center p-8 text-xl font-medium ${highContrast ? 'text-gray-400' : 'text-gray-500'}`}>Nincs a keresésnek megfelelő vállalás.</div>
+                                    ) : (
+                                        <React.Fragment>
+                                            <p className={`text-sm font-semibold mb-4 ${highContrast ? 'text-gray-300' : 'text-gray-500'}`}>
+                                                {filteredPromises.length} vállalás{categoryFilter !== "Minden" ? ` – ${categoryFilter}` : ""}
+                                            </p>
+                                            <div className={`relative border-l-4 ml-4 pl-6 py-2 space-y-8 ${highContrast ? 'border-gray-500' : 'border-tisza-200'}`}>
+                                                {/* Program sorrend szerint (fejezet/alfejezet) */}
+                                                {filteredPromises.slice(0, visibleCount).map(item => (
+                                                    <div key={item.id} className="relative">
+                                                        {/* Idővonal pötty */}
+                                                        <div className={`absolute -left-[35px] top-4 w-6 h-6 rounded-full border-4 shadow ${highContrast ? 'bg-white border-black' : 'bg-tisza-500 border-white'}`}></div>
+                                                        <PromiseCard item={item} showTimeline={true} hc={highContrast} />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {visibleCount < filteredPromises.length && (
+                                                <div className="text-center mt-6">
+                                                    <button
+                                                        onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+                                                        className={`px-6 py-3 rounded-lg font-bold border focus:ring-4 focus:ring-blue-300 transition-colors ${highContrast ? 'bg-white text-black border-white hover:bg-gray-200' : 'bg-tisza-700 text-white border-tisza-700 hover:bg-tisza-500'}`}
+                                                    >
+                                                        További vállalások betöltése ({filteredPromises.length - visibleCount} maradt)
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </React.Fragment>
+                                    )}
+                                </div>
+                            </section>
+                        )}
+
+                        {/* ELVÁLASZTÓ HÚZÓ (Csak asztali nézetben és ha mindkét panel nyitva van) */}
+                        {leftOpen && rightOpen && (
+                            <div
+                                onMouseDown={(e) => { setIsDragging(true); e.preventDefault(); }}
+                                onTouchStart={() => setIsDragging(true)}
+                                className={`hidden lg:flex w-6 cursor-col-resize justify-center items-center z-10 no-select transition-colors rounded-lg ${isDragging ? (highContrast ? 'bg-gray-800' : 'bg-gray-300') : (highContrast ? 'hover:bg-gray-900' : 'hover:bg-gray-200')}`}
+                                title="Húzd a panelek átméretezéséhez"
+                            >
+                                <div className={`w-1.5 h-16 rounded-full ${highContrast ? 'bg-gray-500' : 'bg-gray-400'}`}></div>
+                            </div>
+                        )}
+
+                        {/* JOBB PANEL: TÁBLÁZAT / MEGVALÓSULÁS */}
+                        {rightOpen && (
+                            <section className={`flex-col flex h-full min-w-0 w-full ${leftOpen ? 'lg:w-[calc(100%-var(--left-width)-12px)]' : 'lg:w-full'}`}>
+                                <div className={`p-4 rounded-t-xl border-b-4 flex items-center ${highContrast ? 'bg-black border-white' : 'bg-green-50 border-green-500'}`}>
+                                    <Icon name="check-circle" size={28} className={highContrast ? 'text-white mr-3' : 'text-green-700 mr-3'} />
+                                    <h2 className="text-2xl font-black">Hol tartunk most?</h2>
+                                </div>
+                                
+                                <div className={`flex-1 p-4 rounded-b-xl overflow-x-auto ${highContrast ? 'bg-black border border-t-0 border-white' : 'bg-gray-100 shadow-inner border border-t-0 border-gray-200'}`} style={{ maxHeight: 'calc(100vh - 300px)', minHeight: '500px' }}>
+                                    
+                                    {/* Oszlopok elrendezése */}
+                                    <div className="flex gap-4 min-w-[800px] h-full pb-4">
+                                        {BOARD_STATUSES.map(status => {
+                                            const columnItems = filteredPromises.filter(p => p.status === status.id);
+                                            
+                                            return (
+                                                <div key={status.id} className={`flex-1 min-w-[280px] rounded-xl flex flex-col border-2 ${highContrast ? 'bg-black border-white' : status.color.split(' ')[0] + ' ' + status.color.split(' ')[1]}`}>
+                                                    {/* Oszlop fejléce */}
+                                                    <div className={`p-4 font-black text-xl border-b-2 flex justify-between items-center ${highContrast ? 'border-white text-white' : status.color.split(' ')[1] + ' ' + status.color.split(' ')[2]}`}>
+                                                        <span>{status.label}</span>
+                                                        <span className={`px-3 py-1 rounded-full text-base border ${highContrast ? 'bg-black text-white border-white' : 'bg-white shadow-sm border-transparent'}`}>
+                                                            {columnItems.length}
+                                                        </span>
+                                                    </div>
+                                                    
+                                                    {/* Oszlop tartalma (teljesítmény miatt legfeljebb 60 kártya jelenik meg) */}
+                                                    <div className="p-3 flex-1 overflow-y-auto space-y-3">
+                                                        {columnItems.slice(0, 60).map(item => (
+                                                            <PromiseCard key={item.id} item={item} showTimeline={false} hc={highContrast} />
+                                                        ))}
+                                                        {columnItems.length > 60 && (
+                                                            <div className={`text-center p-3 text-sm font-bold ${highContrast ? 'text-gray-300' : 'text-gray-600'}`}>
+                                                                + további {columnItems.length - 60} vállalás ebben az oszlopban.<br/>
+                                                                Szűkítsd a keresést vagy válassz témakört a teljes listához.
+                                                            </div>
+                                                        )}
+                                                        {columnItems.length === 0 && (
+                                                            <div className={`text-center p-4 text-lg font-medium ${highContrast ? 'text-gray-500' : 'opacity-60'}`}>
+                                                                Ebben az oszlopban nincs megjeleníthető vállalás.
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </section>
+                        )}
+                    </main>
+
+                    {/* LÁBLÉC - Licenc */}
+                    <footer className={`text-center p-6 text-sm font-medium mt-auto ${highContrast ? 'border-t-2 border-white text-gray-300 bg-black' : 'bg-white border-t border-gray-200 text-gray-600'}`}>
+                            <p>Prototípus - hibák lehetnek az oldalon! Ez akár egy államilag karbantartott <strong><a href="https://changemappers.org/projects/rego-os/" target="_blank" rel="noreferrer" className="underline hover:opacity-80">REG-OS weboldal</a></strong> is lehetne.<br/>A weboldal tartalma <strong><a href="https://creativecommons.org/licenses/by-sa/4.0/deed.hu" target="_blank" rel="noreferrer" className="underline hover:opacity-80">CC BY-SA 4.0</a></strong> (Nevezd meg! – Így add tovább! 4.0) licenc alatt érhető el.<br/>Kapcsolat: rendszervaltozas@pm.me</p>
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
