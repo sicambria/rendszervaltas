@@ -1,3 +1,8 @@
+> **⚠️ A projekt leállításra került.**
+> Javasolt alternatíva: [**igeretfigyelo.hu**](https://igeretfigyelo.hu/)
+
+[![Discontinued](https://img.shields.io/badge/status-discontinued-red?style=for-the-badge)](https://igeretfigyelo.hu/)
+
 # Rendszerváltás Követő
 
 Prototípus weboldal, amely a Tisza Párt 2026-os kormányprogramjának (`tisza2026.pdf`) vállalásait és azok megvalósulási állapotát követi nyomon, hiteles forrásokkal alátámasztva.
