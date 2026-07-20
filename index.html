@@ -276,6 +276,10 @@
 
             return (
                 <div className="min-h-screen flex flex-col overflow-x-hidden">
+                    {/* LEÁLLÍTÁSI FIGYELMEZTETÉS */}
+                    <div className={`text-center px-4 py-3 text-sm md:text-base font-bold border-b ${highContrast ? 'bg-red-900 text-white border-red-700' : 'bg-red-100 text-red-900 border-red-300'}`}>
+                        ⚠️ A projekt leállításra került. Javasolt alternatíva: <a href="https://igeretfigyelo.hu/" target="_blank" rel="noreferrer" className={`underline ${highContrast ? 'text-yellow-300 hover:text-white' : 'text-red-700 hover:text-red-900'}`}>igeretfigyelo.hu</a>
+                    </div>
                     {/* FEJLÉC */}
                     <header className={`p-4 shadow-lg z-10 ${highContrast ? 'bg-black border-b border-white' : 'bg-tisza-900 text-white'}`}>
                         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
